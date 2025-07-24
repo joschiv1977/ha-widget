@@ -334,7 +334,7 @@ class HomeAssistantWidget:
                 from requests.auth import HTTPBasicAuth
                 auth = HTTPBasicAuth(username, password)
 
-            self.stream_reader = MJPEGStreamReader(stream_url, auth)
+            self.stream_reader = SimpleStreamReader(stream_url, auth)
             if not self.stream_reader.start_stream():
                 return None
 
@@ -2026,87 +2026,54 @@ class HomeAssistantWidget:
     def run(self):
         self.root.mainloop()
 
-class MJPEGStreamReader:
+import cv2
+
+class SimpleStreamReader:
     def __init__(self, url, auth=None):
         self.url = url
         self.auth = auth
-        self.response = None
+        self.cap = None
         self.running = False
-        self.latest_frame = None
 
     def start_stream(self):
-        """Stream starten"""
-        if self.running:
-            return True
-
+        """Stream mit OpenCV starten"""
         try:
-            self.response = requests.get(self.url, stream=True, auth=self.auth, timeout=10)
-            if self.response.status_code == 200:
-                self.running = True
-                # Stream in eigenem Thread lesen
-                threading.Thread(target=self._read_stream, daemon=True).start()
-                return True
+            # URL mit Auth falls nötig
+            if self.auth:
+                # Requests Session für Auth
+                import requests
+                session = requests.Session()
+                session.auth = self.auth
+                # OpenCV kann direkt mit authentifizierten URLs arbeiten
+                auth_url = self.url.replace('http://', f'http://{self.auth.username}:{self.auth.password}@')
+                self.cap = cv2.VideoCapture(auth_url)
             else:
-                return False
-        except Exception as e:
+                self.cap = cv2.VideoCapture(self.url)
+
+            self.running = self.cap.isOpened()
+            return self.running
+        except:
             return False
 
-    def _read_stream(self):
-        """Stream kontinierlich lesen"""
-        buffer = b''
-
-        try:
-            for chunk in self.response.iter_content(chunk_size=8192):
-                if not self.running:
-                    break
-
-                buffer += chunk
-
-                # Suche nach kompletten JPEG-Frames
-                while True:
-                    start_marker = buffer.find(b'\xff\xd8')
-                    if start_marker == -1:
-                        break
-
-                    end_marker = buffer.find(b'\xff\xd9', start_marker)
-                    if end_marker == -1:
-                        # Kein End-Marker gefunden, warten auf mehr Daten
-                        break
-
-                    # Komplettes Frame gefunden
-                    frame = buffer[start_marker:end_marker + 2]
-                    self.latest_frame = frame
-
-                    # Buffer nach diesem Frame abschneiden
-                    buffer = buffer[end_marker + 2:]
-
-                # Buffer-Größe begrenzen (aber nur wenn kein Start-Marker vorhanden)
-                if len(buffer) > 200000:
-                    start_pos = buffer.find(b'\xff\xd8')
-                    if start_pos != -1:
-                        # Start-Marker vorhanden, ab dort behalten
-                        buffer = buffer[start_pos:]
-                    else:
-                        # Kein Start-Marker, Buffer komplett leeren
-                        buffer = b''
-
-        except Exception as e:
-            print(f"Stream-Read Fehler: {e}")
-        finally:
-            self.running = False
-
     def get_latest_frame(self):
-        """Neuestes Frame holen"""
-        return self.latest_frame
+        """Frame mit OpenCV lesen"""
+        if not self.running or not self.cap:
+            return None
+
+        ret, frame = self.cap.read()
+        if ret:
+            # OpenCV BGR zu RGB konvertieren
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            # Zu JPEG encodieren
+            _, buffer = cv2.imencode('.jpg', frame_rgb)
+            return buffer.tobytes()
+        return None
 
     def stop_stream(self):
         """Stream stoppen"""
         self.running = False
-        if self.response:
-            try:
-                self.response.close()
-            except:
-                pass
+        if self.cap:
+            self.cap.release()
 
 if __name__ == "__main__":
     widget = HomeAssistantWidget()
