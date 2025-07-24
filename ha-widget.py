@@ -106,6 +106,7 @@ class HomeAssistantWidget:
         self.stream_reader = None
         self.pip_window = None
         self.pip_active = False
+        self.main_camera_paused = False
         # Kamera-Größen-Einstellungen
         self.camera_sizes = [
             (480, 270),   # Klein
@@ -1866,6 +1867,11 @@ class HomeAssistantWidget:
             return None
 
     def update_camera(self):
+        # Pausieren wenn PiP aktiv ist
+        if self.main_camera_paused:
+            self.root.after(100, self.update_camera)
+            return
+
         def update():
             image_data = self.get_camera_image()
             if image_data:
@@ -2011,6 +2017,8 @@ class HomeAssistantWidget:
 
         # PiP-Update starten
         self.pip_active = True
+        # Hauptkamera-Updates pausieren wenn PiP aktiv
+        self.main_camera_paused = True
         self.pip_btn.config(bg='#27ae60', text="PiP")  # Grün wenn aktiv
         self.update_pip_camera()
 
@@ -2021,6 +2029,8 @@ class HomeAssistantWidget:
             self.pip_window = None
 
         self.pip_active = False
+        # Hauptkamera-Updates wieder aktivieren
+        self.main_camera_paused = False
         self.pip_btn.config(bg='#e67e22', text="PiP")  # Orange wenn inaktiv
 
     def run(self):
