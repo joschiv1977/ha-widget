@@ -1,28 +1,16 @@
 \# Home Assistant 3D Printer Widget
 
-
-
 Ein modernes Desktop-Widget für Windows, das Home Assistant 3D-Drucker Daten und Bambu Lab MQTT-Verbindung kombiniert.
-
-
 
 \## Features
 
 \- 🏠 Home Assistant Integration
-
 \- 📡 Bambu Lab 3D-Drucker MQTT
-
 \- 📹 Live Kamerastream mit variabler Größe
-
 \- 📊 Echtzeitanzeige aller Druckerdaten
-
 \- 💡 Lichtsteuerung
-
 \- 🎨 Modernes dunkles Design
-
 \- ⚙️ Konfiguration über GUI
-
-
 
 \## Installation
 
