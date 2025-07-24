@@ -20,9 +20,8 @@ Python direkt bei https://www.python.org/downloads/ laden oder über den Microso
 
 ```bash
 
-pip install tkinter pillow requests paho-mqtt
+pip install tkinter pillow requests paho-mqtt opencv-python
 
 \## .exe Datei erstellen
 
 pyinstaller --onedir --windowed --icon=icon.ico ha-widget.py
-

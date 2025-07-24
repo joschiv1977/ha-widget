@@ -1244,7 +1244,7 @@ class HomeAssistantWidget:
 
     def show_about(self):
         """Über-Dialog anzeigen"""
-        about_text = """3D Drucker Widget v1.1
+        about_text = """3D Drucker Widget v1.2
 
     Ein modernes Desktop-Widget für:
     - Home Assistant Integration
