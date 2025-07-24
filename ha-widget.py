@@ -101,8 +101,8 @@ class HomeAssistantWidget:
         self.printer_status = {}
         # Druckername aus Konfiguration
         self.printer_name = self.config["mqtt"]["printer_name"]
-        # Kamera-Modus: True = µStreamer, False = Home Assistant
-        self.use_ustreamer_camera = True
+        # µStreamer basierend auf Konfiguration aktivieren
+        self.use_ustreamer_camera = self.config["ustreamer"]["enabled"]
         self.stream_reader = None
         self.pip_window = None
         self.pip_active = False
@@ -609,6 +609,12 @@ class HomeAssistantWidget:
             activeforeground='white'
         )
         self.camera_switch_btn.pack()
+
+        # Button-Text basierend auf Konfiguration setzen
+        if self.use_ustreamer_camera:
+            self.camera_switch_btn.configure(text="📷 µStreamer", bg="#9b59b6", activebackground="#8e44ad")
+        else:
+            self.camera_switch_btn.configure(text="📹 Home Assistant", bg="#e67e22", activebackground="#d35400")
 
         light_status_label = tk.Label(
             light_subframe,
@@ -1238,7 +1244,7 @@ class HomeAssistantWidget:
 
     def show_about(self):
         """Über-Dialog anzeigen"""
-        about_text = """3D Drucker Widget v1.0
+        about_text = """3D Drucker Widget v1.1
 
     Ein modernes Desktop-Widget für:
     - Home Assistant Integration
@@ -1877,7 +1883,7 @@ class HomeAssistantWidget:
             # Kein "Kamera offline" Text mehr - stört nur
 
         threading.Thread(target=update, daemon=True).start()
-        self.root.after(100, self.update_camera)  # Nur 5 FPS - viel effizienter
+        self.root.after(100, self.update_camera)
 
     def toggle_switch(self):
         try:
@@ -2031,7 +2037,7 @@ class MJPEGStreamReader:
     def start_stream(self):
         """Stream starten"""
         if self.running:
-            return
+            return True
 
         try:
             self.response = requests.get(self.url, stream=True, auth=self.auth, timeout=10)
@@ -2040,9 +2046,10 @@ class MJPEGStreamReader:
                 # Stream in eigenem Thread lesen
                 threading.Thread(target=self._read_stream, daemon=True).start()
                 return True
+            else:
+                return False
         except Exception as e:
-            print(f"Stream-Start Fehler: {e}")
-        return False
+            return False
 
     def _read_stream(self):
         """Stream kontinierlich lesen"""
@@ -2055,21 +2062,33 @@ class MJPEGStreamReader:
 
                 buffer += chunk
 
-                # JPEG-Frame suchen
-                start_marker = buffer.find(b'\xff\xd8')
-                end_marker = buffer.find(b'\xff\xd9')
+                # Suche nach kompletten JPEG-Frames
+                while True:
+                    start_marker = buffer.find(b'\xff\xd8')
+                    if start_marker == -1:
+                        break
 
-                if start_marker != -1 and end_marker != -1 and end_marker > start_marker:
-                    # Frame gefunden
+                    end_marker = buffer.find(b'\xff\xd9', start_marker)
+                    if end_marker == -1:
+                        # Kein End-Marker gefunden, warten auf mehr Daten
+                        break
+
+                    # Komplettes Frame gefunden
                     frame = buffer[start_marker:end_marker + 2]
                     self.latest_frame = frame
 
-                    # Buffer säubern
+                    # Buffer nach diesem Frame abschneiden
                     buffer = buffer[end_marker + 2:]
 
-                # Buffer-Größe begrenzen
-                if len(buffer) > 100000:
-                    buffer = buffer[-50000:]
+                # Buffer-Größe begrenzen (aber nur wenn kein Start-Marker vorhanden)
+                if len(buffer) > 200000:
+                    start_pos = buffer.find(b'\xff\xd8')
+                    if start_pos != -1:
+                        # Start-Marker vorhanden, ab dort behalten
+                        buffer = buffer[start_pos:]
+                    else:
+                        # Kein Start-Marker, Buffer komplett leeren
+                        buffer = b''
 
         except Exception as e:
             print(f"Stream-Read Fehler: {e}")

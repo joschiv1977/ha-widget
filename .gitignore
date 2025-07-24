@@ -1,0 +1,5 @@
+ha-widget.spec
+widget_config.json
+/build
+/dist
+commands.txt
