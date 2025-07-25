@@ -6,7 +6,7 @@ a = Analysis(
     ['ha-widget.py'],
     pathex=[],
     binaries=[],
-    datas=[('widget_config.json', '.')],
+    datas=[],  # Keine Dateien hinzufügen - Programm erstellt Config selbst
     hiddenimports=[
         'PIL',
         'PIL.Image', 
