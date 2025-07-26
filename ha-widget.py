@@ -2093,6 +2093,27 @@ class HomeAssistantWidget:
         )
         self.pip_camera_label.pack(fill='both', expand=True, padx=5, pady=5)
 
+        # Overlay-Button für Kamera-Wechsel im PiP
+        pip_overlay_frame = tk.Frame(self.pip_window, bg='#2c3e50', relief='solid', bd=1)
+        pip_overlay_frame.place(x=10, y=10)
+
+        pip_camera_switch_btn = tk.Button(
+            pip_overlay_frame,
+            text="📷" if self.use_ustreamer_camera else "📹",
+            command=self.pip_toggle_camera,
+            font=("Arial", 8, "bold"),
+            width=3,
+            height=1,
+            bg='#9b59b6' if self.use_ustreamer_camera else '#e67e22',
+            fg='white',
+            relief='flat',
+            cursor='hand2'
+        )
+        pip_camera_switch_btn.pack(padx=2, pady=2)
+
+        # Button-Referenz speichern
+        self.pip_camera_switch_btn = pip_camera_switch_btn
+
         # Beim Schließen des PiP-Fensters
         self.pip_window.protocol("WM_DELETE_WINDOW", self.stop_pip)
 
@@ -2113,6 +2134,24 @@ class HomeAssistantWidget:
         # Hauptkamera-Updates wieder aktivieren
         self.main_camera_paused = False
         self.pip_btn.config(bg='#e67e22', text="PiP")  # Orange wenn inaktiv
+
+    def pip_toggle_camera(self):
+        """Kamera im PiP-Fenster wechseln"""
+        # Hauptkamera-Quelle umschalten
+        self.toggle_camera_source()
+
+        # PiP-Button entsprechend aktualisieren
+        if hasattr(self, 'pip_camera_switch_btn'):
+            if self.use_ustreamer_camera:
+                self.pip_camera_switch_btn.configure(
+                    text="📷",
+                    bg="#9b59b6"
+                )
+            else:
+                self.pip_camera_switch_btn.configure(
+                    text="📹",
+                    bg="#e67e22"
+                )
 
     def run(self):
         self.root.mainloop()
@@ -2155,7 +2194,21 @@ class SimpleStreamReader:
             if not self.running or not self.cap:
                 return None
 
-            ret, frame = self.cap.read()
+            try:
+                ret, frame = self.cap.read()
+            except cv2.error:
+                # OpenCV Fehler - VideoCapture ist korrupt, komplett neu erstellen
+                print("OpenCV Fehler - erstelle VideoCapture neu")
+                self.cap.release()
+                self.cap = None
+                self.running = False
+                return None
+            except Exception:
+                # Andere Fehler auch abfangen
+                self.cap.release()
+                self.cap = None
+                self.running = False
+                return None
             if ret:
                 # Erfolgreicher Frame - Timestamp aktualisieren
                 import time
