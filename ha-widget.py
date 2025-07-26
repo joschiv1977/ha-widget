@@ -71,6 +71,9 @@ class HomeAssistantWidget:
                 "bambu_access_code": "DEIN_ACCESS_CODE",   # Statt 12345678
                 "printer_name": "3D Drucker",            # Benutzerdefinierten Drucker Namen
             },
+            "ui": {
+                "default_camera_size": 2  # 0=S, 1=M, 2=L, 3=XL
+            },
             "ustreamer": {
                 "enabled": False,
                 "pi5_ip": "192.168.178.2",
@@ -114,7 +117,7 @@ class HomeAssistantWidget:
             (720, 405),   # Groß
             (960, 540)    # Sehr groß
         ]
-        self.current_size_index = 1  # Start mit Medium
+        self.current_size_index = self.config["ui"]["default_camera_size"]
 
         # App-Größen entsprechend der Kamera-Größe
         self.app_sizes = [
@@ -142,6 +145,7 @@ class HomeAssistantWidget:
         }
 
         self.setup_gui()
+        self.set_camera_size(self.current_size_index)
 
         # Setup-Wizard anzeigen wenn nicht konfiguriert
         if not self.is_configured():
@@ -336,6 +340,9 @@ class HomeAssistantWidget:
                 auth = HTTPBasicAuth(username, password)
 
             self.stream_reader = SimpleStreamReader(stream_url, auth)
+            # Ersten Frame-Timestamp setzen
+            import time
+            self.stream_reader.last_frame_time = time.time()
             if not self.stream_reader.start_stream():
                 return None
 
@@ -836,6 +843,7 @@ class HomeAssistantWidget:
         settings_menu.add_command(label="Home Assistant", command=self.open_ha_settings)
         settings_menu.add_command(label="MQTT Drucker", command=self.open_mqtt_settings)
         settings_menu.add_command(label="µStreamer Kamera", command=self.open_ustreamer_settings)
+        settings_menu.add_command(label="Anzeige", command=self.open_display_settings)
 
         # Verbindung-Menü
         connection_menu = tk.Menu(menubar, tearoff=0)
@@ -1216,6 +1224,65 @@ class HomeAssistantWidget:
             settings_window.destroy()
 
         tk.Button(button_frame, text="Speichern", command=save_settings,
+                  bg='#27ae60', fg='white', font=self.font_normal, width=15).pack(side='right', padx=5)
+        tk.Button(button_frame, text="Abbrechen", command=settings_window.destroy,
+                  bg='#e74c3c', fg='white', font=self.font_normal, width=15).pack(side='right')
+
+    def open_display_settings(self):
+        """Anzeige-Einstellungen öffnen"""
+        settings_window = tk.Toplevel(self.root)
+        settings_window.title("Anzeige-Einstellungen")
+        # Icon setzen
+        try:
+            settings_window.iconbitmap('icon.ico')
+        except:
+            pass
+        self.center_window(settings_window, 400, 300)
+        settings_window.configure(bg='#2c3e50')
+        settings_window.resizable(False, False)
+
+        main_frame = tk.Frame(settings_window, bg='#2c3e50')
+        main_frame.pack(fill='both', expand=True, padx=20, pady=20)
+
+        title = tk.Label(main_frame, text="Anzeige-Einstellungen",
+                         font=self.font_title, bg='#2c3e50', fg='#ecf0f1')
+        title.pack(pady=(0, 20))
+
+        # Standard Kameragröße
+        tk.Label(main_frame, text="Standard Kameragröße beim Start:",
+                 font=self.font_normal, bg='#2c3e50', fg='#bdc3c7').pack(anchor='w', pady=(0, 5))
+
+        size_var = tk.StringVar()
+        size_names = ["S (Klein)", "M (Medium)", "L (Groß)", "XL (Sehr groß)"]
+        current_size = self.config["ui"]["default_camera_size"]
+        size_var.set(size_names[current_size])
+
+        size_combo = ttk.Combobox(main_frame, textvariable=size_var, values=size_names,
+                                  state="readonly", font=self.font_normal, width=25)
+        size_combo.pack(fill='x', pady=(0, 20))
+
+        # Info
+        info_text = "Die gewählte Größe wird beim nächsten Start\nder App als Standard verwendet."
+        tk.Label(main_frame, text=info_text, font=self.font_small,
+                 bg='#2c3e50', fg='#95a5a6', justify='center').pack(pady=(10, 20))
+
+        # Buttons
+        button_frame = tk.Frame(main_frame, bg='#2c3e50')
+        button_frame.pack(fill='x')
+
+        def save_display_settings():
+            # Index basierend auf Auswahl ermitteln
+            selected_index = size_names.index(size_var.get())
+            self.config["ui"]["default_camera_size"] = selected_index
+            self.save_config()
+
+            # Sofort anwenden
+            self.set_camera_size(selected_index)
+
+            messagebox.showinfo("Gespeichert", "Anzeige-Einstellungen gespeichert!")
+            settings_window.destroy()
+
+        tk.Button(button_frame, text="Speichern", command=save_display_settings,
                   bg='#27ae60', fg='white', font=self.font_normal, width=15).pack(side='right', padx=5)
         tk.Button(button_frame, text="Abbrechen", command=settings_window.destroy,
                   bg='#e74c3c', fg='white', font=self.font_normal, width=15).pack(side='right')
@@ -1874,6 +1941,20 @@ class HomeAssistantWidget:
 
         def update():
             image_data = self.get_camera_image()
+            # µStreamer Status prüfen
+            if (self.use_ustreamer_camera and
+                self.config["ustreamer"]["enabled"] and
+                self.stream_reader and
+                not self.stream_reader.running and
+                self.stream_reader.retry_count >= self.stream_reader.max_retries):
+
+                # Fallback zu Home Assistant Kamera
+                print("µStreamer ausgefallen - Fallback zu HA Kamera")
+                self.use_ustreamer_camera = False
+                self.camera_switch_btn.configure(
+                    text="📹 Home Assistant (Fallback)",
+                    bg="#e67e22"
+                )
             if image_data:
                 try:
                     image = Image.open(io.BytesIO(image_data))
@@ -2044,6 +2125,10 @@ class SimpleStreamReader:
         self.auth = auth
         self.cap = None
         self.running = False
+        self.last_frame_time = None
+        self.frame_timeout = 5  # 10 Sekunden Timeout
+        self.retry_count = 0
+        self.max_retries = 3
 
     def start_stream(self):
         """Stream mit OpenCV starten"""
@@ -2066,24 +2151,57 @@ class SimpleStreamReader:
             return False
 
     def get_latest_frame(self):
-        """Frame mit OpenCV lesen"""
-        if not self.running or not self.cap:
-            return None
+            """Frame mit OpenCV lesen und Timeout-Erkennung"""
+            if not self.running or not self.cap:
+                return None
 
-        ret, frame = self.cap.read()
-        if ret:
-            # OpenCV BGR zu RGB konvertieren
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            # Zu JPEG encodieren
-            _, buffer = cv2.imencode('.jpg', frame_rgb)
-            return buffer.tobytes()
-        return None
+            ret, frame = self.cap.read()
+            if ret:
+                # Erfolgreicher Frame - Timestamp aktualisieren
+                import time
+                self.last_frame_time = time.time()
+                self.retry_count = 0  # Reset bei erfolgreichem Frame
+
+                # OpenCV BGR zu RGB konvertieren
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                # Zu JPEG encodieren
+                _, buffer = cv2.imencode('.jpg', frame_rgb)
+                return buffer.tobytes()
+            else:
+                # Kein Frame erhalten - prüfe Timeout
+                import time
+                current_time = time.time()
+
+                if self.last_frame_time and (current_time - self.last_frame_time) > self.frame_timeout:
+                    print(f"µStreamer Timeout erkannt - versuche Neustart (Versuch {self.retry_count + 1})")
+                    if self.retry_count < self.max_retries:
+                        self.retry_count += 1
+                        self.restart_stream()
+                    else:
+                        print("µStreamer: Max. Versuche erreicht - Stream deaktiviert")
+                        self.running = False
+
+            return None
 
     def stop_stream(self):
         """Stream stoppen"""
         self.running = False
         if self.cap:
             self.cap.release()
+
+    def restart_stream(self):
+        """Stream neu starten"""
+        print("µStreamer: Neustart des Streams...")
+        self.stop_stream()
+        import time
+        time.sleep(1)  # Kurze Pause
+        success = self.start_stream()
+        if success:
+            print("µStreamer: Stream erfolgreich neu gestartet")
+            self.last_frame_time = time.time()
+        else:
+            print("µStreamer: Neustart fehlgeschlagen")
+        return success
 
 if __name__ == "__main__":
     widget = HomeAssistantWidget()

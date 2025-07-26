@@ -20,7 +20,7 @@ Python direkt bei https://www.python.org/downloads/ laden oder über den Microso
 
 ```bash
 
-pip install tkinter pillow requests paho-mqtt opencv-python
+pip install pillow requests paho-mqtt opencv-python
 
 \## .exe Datei erstellen
 
