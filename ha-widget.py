@@ -1975,6 +1975,20 @@ class HomeAssistantWidget:
     def toggle_switch(self):
         try:
             current_state = self.get_state()["state"]
+
+            # Prüfe ob gerade gedruckt wird
+            is_printing = (self.last_print_data.get('gcode_state') == 'RUNNING')
+
+            # Wenn Drucker an ist, gedruckt wird und ausgeschaltet werden soll
+            if current_state == "on" and is_printing:
+                result = messagebox.askyesno(
+                    "Drucker während Druck ausschalten?",
+                    "Der Drucker druckt gerade!\n\nWirklich ausschalten? Der Druck wird abgebrochen!",
+                    icon="warning"
+                )
+                if not result:  # Benutzer hat "Nein" gewählt
+                    return
+
             if current_state == "on":
                 service = "turn_off"
             else:
@@ -1996,15 +2010,33 @@ class HomeAssistantWidget:
         state_data = self.get_state()
         if state_data:
             state = state_data["state"]
+            is_printing = (self.last_print_data.get('gcode_state') == 'RUNNING')
+
             if state == "on":
-                self.status_label.config(text="Status: Ein", fg="#27ae60")
-                self.toggle_button.config(bg="#27ae60", activebackground="#2ecc71")
+                if is_printing:
+                    # Drucker an und druckt - roter Button mit "Druckt"
+                    self.status_label.config(text="Status: beschäftigt", fg="#e74c3c")
+                    self.toggle_button.config(
+                        text="druckt",
+                        bg="#e74c3c",
+                        activebackground="#c0392b"
+                    )
+                else:
+                    # Drucker an aber druckt nicht - grüner Button mit "Ein"
+                    self.status_label.config(text="Status: Ein", fg="#27ae60")
+                    self.toggle_button.config(
+                        text="Einschalten",
+                        bg="#27ae60",
+                        activebackground="#2ecc71"
+                    )
             else:
+                # Drucker aus - grauer Button
                 self.status_label.config(text="Status: Aus", fg="#e74c3c")
-                self.toggle_button.config(bg="#e74c3c", activebackground="#c0392b")
-        else:
-            self.status_label.config(text="Status: Offline", fg="gray")
-            self.toggle_button.config(bg="lightgray")
+                self.toggle_button.config(
+                    text="Ausschalten",
+                    bg="#e74c3c",
+                    activebackground="#c0392b"
+                )
 
         # Sensor Status aktualisieren
         for entity in self.entities:
@@ -2076,7 +2108,7 @@ class HomeAssistantWidget:
         # PiP-Fenster erstellen
         self.pip_window = tk.Toplevel(self.root)
         self.pip_window.title("📹 Kamera PiP")
-        self.pip_window.geometry("640x360+100+100")  # Startgröße und Position
+        self.pip_window.geometry("480x270+100+100")  # Startgröße und Position
         self.pip_window.configure(bg='#1a252f')
 
         # Fenster-Eigenschaften
