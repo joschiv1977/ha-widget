@@ -62,7 +62,8 @@ class HomeAssistantWidget:
                     "sensor.your_printer_start_time",
                     "sensor.your_printer_remaining_time",
                     "sensor.your_printer_end_time",
-                    "light.your_printer_chamber_light"
+                    "light.your_printer_chamber_light",
+                    "image.p1s_01p09c4c1700729_titelbild"
                 ]
             },
             "mqtt": {
@@ -121,10 +122,10 @@ class HomeAssistantWidget:
 
         # App-Größen entsprechend der Kamera-Größe
         self.app_sizes = [
-            (1200, 850),  # Klein - App klein
-            (1300, 910),  # Medium - Standard
-            (1400, 910),  # Groß - App größer
-            (1600, 1050)  # Sehr groß - App sehr groß
+            (1200, 860),  # Klein - App klein
+            (1300, 920),  # Medium - Standard
+            (1400, 920),  # Groß - App größer
+            (1600, 1030)  # Sehr groß - App sehr groß
         ]
 
         # Cache für letzte bekannte Druckdaten
@@ -170,6 +171,7 @@ class HomeAssistantWidget:
         """Startet Updates immer"""
         self.update_status()
         self.update_camera()
+        self.update_titelbild()
 
     def show_unconfigured_status(self):
         """Zeigt Status für unkonfigurierte App"""
@@ -545,9 +547,6 @@ class HomeAssistantWidget:
         self.size_buttons = [small_btn, medium_btn, large_btn, xlarge_btn]
         self.pip_btn = pip_btn
 
-        # Buttons für Referenz speichern
-        self.size_buttons = [small_btn, medium_btn, large_btn, xlarge_btn]
-
         # Button-Container für nebeneinander liegende Buttons
         button_container = tk.Frame(camera_inner, bg='#34495e')
         button_container.pack(pady=(15, 0), fill='x')
@@ -656,9 +655,17 @@ class HomeAssistantWidget:
         progress_inner = tk.Frame(progress_card, bg='#2c3e50')
         progress_inner.pack(padx=10, pady=10, fill='x')
 
+        # === HORIZONTALER CONTAINER FÜR MQTT UND TITELBILD ===
+        mqtt_titelbild_container = tk.Frame(progress_inner, bg='#2c3e50')
+        mqtt_titelbild_container.pack(fill='x', pady=(0, 10))
+
+        # === LINKE SEITE: MQTT DATEN ===
+        mqtt_info_frame = tk.Frame(mqtt_titelbild_container, bg='#2c3e50')
+        mqtt_info_frame.pack(side='left', fill='both', expand=True, padx=(0, 10))
+
         # MQTT Status
         self.mqtt_status_label = tk.Label(
-            progress_inner,
+            mqtt_info_frame,
             text="📡 MQTT: Nicht verbunden",
             font=self.font_normal,
             bg='#2c3e50',
@@ -668,7 +675,7 @@ class HomeAssistantWidget:
 
         # Druckfortschritt Titel
         progress_title = tk.Label(
-            progress_inner,
+            mqtt_info_frame,
             text="🖨️ Live Druckfortschritt",
             font=self.font_title,
             bg='#2c3e50',
@@ -676,7 +683,7 @@ class HomeAssistantWidget:
         )
         progress_title.pack(pady=(0, 10))
 
-        # Progress Bar
+        # Progress Bar (nur über MQTT-Bereich)
         self.progress_var = tk.DoubleVar()
         progress_style = ttk.Style()
         progress_style.configure("Custom.Horizontal.TProgressbar",
@@ -687,7 +694,7 @@ class HomeAssistantWidget:
                                  darkcolor='#3498db')
 
         self.progress_bar = ttk.Progressbar(
-            progress_inner,
+            mqtt_info_frame,
             variable=self.progress_var,
             maximum=100,
             style="Custom.Horizontal.TProgressbar"
@@ -696,7 +703,7 @@ class HomeAssistantWidget:
 
         # Progress Info
         self.progress_info = tk.Label(
-            progress_inner,
+            mqtt_info_frame,
             text="Fortschritt: 0% | Schicht: 0/0",
             font=self.font_normal,
             bg='#2c3e50',
@@ -706,7 +713,7 @@ class HomeAssistantWidget:
 
         # Zeit Info
         self.time_info = tk.Label(
-            progress_inner,
+            mqtt_info_frame,
             text="Zeit: --:-- / Verbleibend: --:--",
             font=self.font_normal,
             bg='#2c3e50',
@@ -716,7 +723,7 @@ class HomeAssistantWidget:
 
         # Datei Info
         self.file_info = tk.Label(
-            progress_inner,
+            mqtt_info_frame,
             text="Datei: Kein Druck aktiv",
             font=self.font_normal,
             bg='#2c3e50',
@@ -726,7 +733,7 @@ class HomeAssistantWidget:
 
         # MQTT Connect Button
         self.mqtt_connect_btn = tk.Button(
-            progress_inner,
+            mqtt_info_frame,
             text="📡 MQTT Verbinden",
             command=self.connect_mqtt,
             font=self.font_normal,
@@ -740,6 +747,16 @@ class HomeAssistantWidget:
             activeforeground='white'
         )
         self.mqtt_connect_btn.pack(pady=(10, 0))
+
+        # === RECHTE SEITE: NUR TITELBILD ===
+        self.titelbild_label = tk.Label(
+            mqtt_titelbild_container,
+            text="Lade Titelbild...",
+            bg='#2c3e50',
+            fg='#95a5a6',
+            font=self.font_normal
+        )
+        self.titelbild_label.pack(side='right', fill='both', padx=(10, 0))
 
         # Sensoren Bereich - Moderne Card (rechte Seite)
         sensor_card = tk.Frame(horizontal_frame, bg='#34495e', relief='solid', bd=1)
@@ -771,7 +788,6 @@ class HomeAssistantWidget:
 
         canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
 
-
         # Labels für Sensoren erstellen - Moderne Rows
         self.sensor_labels = {}
         for i, entity in enumerate(self.entities):
@@ -782,7 +798,6 @@ class HomeAssistantWidget:
             else:
                 full_name = entity.split('.')[-1].replace('_', ' ').title()
                 # Generisches Prefix-Cleaning für Bambu Drucker
-                # Entferne Muster wie "P1S SERIENNUMMER" am Anfang
                 import re
                 name = re.sub(r'^P1S [A-Z0-9]+ ', '', full_name).strip()
                 if not name:  # Falls alles entfernt wurde
@@ -1858,6 +1873,91 @@ class HomeAssistantWidget:
             self.file_info.config(text=f"Datei: {filename} (Fehler)", fg="#e74c3c")
         else:
             self.file_info.config(text="Datei: Kein Druck aktiv", fg="#bdc3c7")
+
+    def update_titelbild(self):
+        """Drucker Titelbild von HA laden"""
+        def load_image():
+            try:
+                # Direkte Entity verwenden
+                titelbild_entity = "image.p1s_01p09c4c1700729_titelbild"
+
+                # Bild von HA API laden
+                response = requests.get(
+                    f"{self.ha_url}/api/states/{titelbild_entity}",
+                    headers=self.headers,
+                    timeout=5
+                )
+
+                if response.status_code == 200:
+                    entity_data = response.json()
+
+                    # Prüfe ob Entity verfügbar ist
+                    if entity_data['state'] == 'unavailable':
+                        self.titelbild_label.config(text="Titelbild nicht verfügbar")
+                        return
+
+                    # Bild-URL aus Attributen holen
+                    attributes = entity_data.get('attributes', {})
+                    entity_picture = attributes.get('entity_picture')
+
+
+                    if entity_picture:
+                        # Vollständige URL erstellen
+                        image_url = f"{self.ha_url}{entity_picture}"
+
+                        # Bild herunterladen
+                        img_response = requests.get(image_url, headers=self.headers, timeout=10)
+
+
+                        if img_response.status_code == 200:
+                            # Bild verarbeiten
+                            image_data = img_response.content
+                            image = Image.open(io.BytesIO(image_data))
+
+                            # Bild auf passende Größe skalieren
+                            max_width, max_height = 300, 200
+
+                            # Seitenverhältnis beibehalten
+                            img_ratio = image.width / image.height
+                            if img_ratio > max_width / max_height:
+                                # Breiter - an Breite anpassen
+                                new_width = max_width
+                                new_height = int(max_width / img_ratio)
+                            else:
+                                # Höher - an Höhe anpassen
+                                new_height = max_height
+                                new_width = int(max_height * img_ratio)
+
+                            image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                            photo = ImageTk.PhotoImage(image)
+
+                            # Label aktualisieren
+                            self.titelbild_label.config(image=photo, text="")
+                            self.titelbild_label.image = photo
+
+
+                        else:
+                            error_msg = f"Bild laden fehlgeschlagen: {img_response.status_code}"
+                            print(error_msg)
+                            self.titelbild_label.config(text=error_msg)
+                    else:
+                        error_msg = "Keine Bild-URL gefunden"
+                        print(error_msg)
+                        self.titelbild_label.config(text=error_msg)
+                else:
+                    error_msg = f"Entity nicht gefunden: {response.status_code}"
+                    print(error_msg)
+                    self.titelbild_label.config(text=error_msg)
+
+            except Exception as e:
+                error_msg = f"Titelbild Fehler: {e}"
+                print(error_msg)
+                self.titelbild_label.config(text="Fehler beim Laden")
+
+        threading.Thread(target=load_image, daemon=True).start()
+
+        # Alle 10 Sekunden aktualisieren
+        self.root.after(10000, self.update_titelbild)
 
     def update_button_status(self):
         """Button-Status basierend auf Druckstatus aktualisieren"""
