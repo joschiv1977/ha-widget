@@ -571,16 +571,16 @@ class HomeAssistantWidget:
 
         self.toggle_button = tk.Button(
             switch_subframe,
-            text="Ein/Aus",
+            text="ausschalten",
             command=self.toggle_switch,
             font=self.font_title,
             width=12,
             height=1,
             relief='flat',
             cursor='hand2',
-            bg='#3498db',
+            bg='#2ecc71',
             fg='white',
-            activebackground='#2980b9',
+            activebackground='#2ecc71',
             activeforeground='white'
         )
         self.toggle_button.pack()
@@ -1877,10 +1877,11 @@ class HomeAssistantWidget:
                 else:
                     self.status_label.config(text="Status: Ein", fg="#27ae60")
                     self.toggle_button.config(
-                        text="Ein/Aus",
-                        bg="#27ae60",
+                        text="ausschalten",
+                        bg="#e74c3c",
                         activebackground="#2ecc71"
                     )
+
 
     def update_printer_title(self):
         """Drucker-Titel mit echtem Namen aktualisieren"""
@@ -2008,7 +2009,8 @@ class HomeAssistantWidget:
                 result = messagebox.askyesno(
                     "Drucker während Druck ausschalten?",
                     "Der Drucker druckt gerade!\n\nWirklich ausschalten? Der Druck wird abgebrochen!",
-                    icon="warning"
+                    icon="warning",
+                    default="no"
                 )
                 if not result:  # Benutzer hat "Nein" gewählt
                     return
@@ -2036,6 +2038,21 @@ class HomeAssistantWidget:
             state = state_data["state"]
             is_printing = (self.last_print_data.get('gcode_state') == 'RUNNING')
 
+            # Wenn noch keine MQTT-Daten da sind, Temperatur als Fallback nutzen
+            if not is_printing and self.last_print_data.get('gcode_state') == 'IDLE':
+                # Suche Düsentemperatur-Sensor
+                for entity in self.entities:
+                    if "temperatur_der_duse" in entity or "nozzle_temp" in entity:
+                        nozzle_data = self.get_state(entity)
+                        if nozzle_data:
+                            try:
+                                temp = float(nozzle_data["state"])
+                                if temp > 180:
+                                    is_printing = True  # Setze auf True basierend auf Temperatur
+                                    break
+                            except (ValueError, TypeError):
+                                pass
+
             if state == "on":
                 if is_printing:
                     # Drucker an und druckt - roter Button mit "Druckt"
@@ -2049,17 +2066,17 @@ class HomeAssistantWidget:
                     # Drucker an aber druckt nicht - grüner Button mit "Ein"
                     self.status_label.config(text="Status: Ein", fg="#27ae60")
                     self.toggle_button.config(
-                        text="Einschalten",
-                        bg="#27ae60",
-                        activebackground="#2ecc71"
+                        text="ausschalten",
+                        bg="#e74c3c",
+                        activebackground="#e74c3c"
                     )
             else:
                 # Drucker aus - grauer Button
                 self.status_label.config(text="Status: Aus", fg="#e74c3c")
                 self.toggle_button.config(
-                    text="Ausschalten",
-                    bg="#e74c3c",
-                    activebackground="#c0392b"
+                    text="einschalten",
+                    bg="#2ecc71",
+                    activebackground="#2ecc71"
                 )
 
         # Sensor Status aktualisieren
