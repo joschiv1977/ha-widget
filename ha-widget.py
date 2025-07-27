@@ -1802,6 +1802,7 @@ class HomeAssistantWidget:
 
         # UI mit gecachten Daten aktualisieren
         self.update_progress_ui()
+        self.update_button_status()
 
     def update_progress_ui(self):
         """Progress UI mit gecachten Daten aktualisieren"""
@@ -1857,6 +1858,29 @@ class HomeAssistantWidget:
             self.file_info.config(text=f"Datei: {filename} (Fehler)", fg="#e74c3c")
         else:
             self.file_info.config(text="Datei: Kein Druck aktiv", fg="#bdc3c7")
+
+    def update_button_status(self):
+        """Button-Status basierend auf Druckstatus aktualisieren"""
+        state_data = self.get_state()
+        if state_data:
+            state = state_data["state"]
+            is_printing = (self.last_print_data.get('gcode_state') == 'RUNNING')
+
+            if state == "on":
+                if is_printing:
+                    self.status_label.config(text="Status: beschäftigt", fg="#e74c3c")
+                    self.toggle_button.config(
+                        text="druckt",
+                        bg="#e74c3c",
+                        activebackground="#c0392b"
+                    )
+                else:
+                    self.status_label.config(text="Status: Ein", fg="#27ae60")
+                    self.toggle_button.config(
+                        text="Ein/Aus",
+                        bg="#27ae60",
+                        activebackground="#2ecc71"
+                    )
 
     def update_printer_title(self):
         """Drucker-Titel mit echtem Namen aktualisieren"""
