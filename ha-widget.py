@@ -30,6 +30,7 @@ import ssl
 import json
 import os
 from tkinter import filedialog
+from plyer import notification
 
 class HomeAssistantWidget:
     def __init__(self):
@@ -140,6 +141,9 @@ class HomeAssistantWidget:
         }
         # ===== ENDE KONFIGURATION =====
 
+        # Status-Tracking für Benachrichtigungen
+        self.previous_gcode_state = 'IDLE'
+
         self.headers = {
             "Authorization": f"Bearer {self.token}",
             "Content-Type": "application/json"
@@ -155,8 +159,8 @@ class HomeAssistantWidget:
         else:
             self.root.after(1000, self.check_and_start_updates)
 
-        # MQTT IMMER versuchen (unabhängig von HA-Konfiguration)
-        self.root.after(2000, self.auto_connect_mqtt)
+        # MQTT nur starten wenn Drucker eingeschaltet ist
+        self.root.after(2000, self.check_printer_and_start_mqtt)
 
         # Cleanup beim Schließen
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -172,6 +176,25 @@ class HomeAssistantWidget:
         self.update_status()
         self.update_camera()
         self.update_titelbild()
+
+    def check_printer_and_start_mqtt(self):
+        """Prüft Drucker-Status und startet MQTT nur wenn Drucker eingeschaltet ist"""
+        # Erst prüfen ob Home Assistant konfiguriert ist
+        if not self.is_configured():
+            print("HA nicht konfiguriert - MQTT-Check übersprungen")
+            return
+
+        # Drucker-Status von Home Assistant abrufen
+        state_data = self.get_state()
+
+        if state_data and state_data["state"] == "on":
+            print("✅ Drucker ist an - starte MQTT-Verbindung...")
+            self.auto_connect_mqtt()
+        else:
+            if state_data:
+                print(f"⏸️ Drucker ist aus ({state_data['state']}) - MQTT-Verbindung übersprungen")
+            else:
+                print("❌ Drucker-Status konnte nicht abgerufen werden - MQTT-Verbindung übersprungen")
 
     def show_unconfigured_status(self):
         """Zeigt Status für unkonfigurierte App"""
@@ -1701,8 +1724,8 @@ class HomeAssistantWidget:
             self.mqtt_client.connect(self.bambu_ip, 8883, 60)
             self.mqtt_client.loop_start()
 
-            # Nach 10 Sekunden prüfen ob Verbindung erfolgreich
-            self.root.after(10000, self.check_mqtt_connection)
+            # Nach 15 Sekunden prüfen ob Verbindung erfolgreich
+            self.root.after(15000, self.check_mqtt_connection)
 
         except Exception as e:
             if hasattr(self, 'mqtt_status_label'):
@@ -1846,6 +1869,9 @@ class HomeAssistantWidget:
             self.last_print_data['filename'] = filename
         if gcode_state is not None:
             self.last_print_data['gcode_state'] = gcode_state
+        if gcode_state is not None and gcode_state != self.previous_gcode_state:
+            self.check_and_send_notification(gcode_state, filename)
+            self.previous_gcode_state = gcode_state
 
         # UI mit gecachten Daten aktualisieren
         self.update_progress_ui()
@@ -2163,6 +2189,12 @@ class HomeAssistantWidget:
 
             self.root.after(500, self.update_status)
 
+            # MQTT nach Einschalten des Druckers automatisch verbinden (mit Retry)
+            if service == "turn_on":
+                print("Drucker wird eingeschaltet - MQTT-Verbindung startet in 20 Sekunden...")
+                self.mqtt_retry_count = 0
+                self.root.after(20000, self.retry_mqtt_after_power_on)
+
         except Exception as e:
             messagebox.showerror("Fehler", f"Verbindungsfehler: {str(e)}")
 
@@ -2267,6 +2299,20 @@ class HomeAssistantWidget:
 
         # Alle 5 Sekunden Status aktualisieren
         self.root.after(5000, self.update_status)
+        # Prüfe ob MQTT verbunden werden sollte (falls Drucker gerade eingeschaltet wurde)
+        self.check_mqtt_auto_connect(state_data)
+
+    def check_mqtt_auto_connect(self, state_data):
+        """Prüft ob MQTT automatisch verbunden werden sollte"""
+        # Nur wenn MQTT nicht verbunden ist und Drucker an ist
+        if (not self.mqtt_connected and
+            state_data and state_data["state"] == "on" and
+            self.bambu_ip != "DEINE_DRUCKER_IP" and
+            self.bambu_serial != "DEINE_SERIENNUMMER" and
+            self.bambu_access_code != "DEIN_ACCESS_CODE"):
+
+            print("🔄 Drucker ist an aber MQTT getrennt - starte Verbindung...")
+            self.auto_connect_mqtt()
 
     def toggle_pip(self):
         """Picture-in-Picture Modus ein/ausschalten"""
@@ -2359,6 +2405,97 @@ class HomeAssistantWidget:
                     text="📹",
                     bg="#e67e22"
                 )
+
+    def check_and_send_notification(self, new_state, filename):
+            """Windows-Benachrichtigung bei wichtigen Statuswechseln senden"""
+            try:
+                if new_state == "FINISH":
+                    # Druck erfolgreich beendet
+                    notification.notify(
+                        title="🎉 Druck abgeschlossen!",
+                        message=f"'{filename or 'Druckauftrag'}' wurde erfolgreich gedruckt.",
+                        app_name="3D Drucker Widget",
+                        timeout=10
+                    )
+
+                elif new_state == "FAILED":
+                    # Druck fehlgeschlagen
+                    notification.notify(
+                        title="❌ Druckfehler!",
+                        message=f"'{filename or 'Druckauftrag'}' ist fehlgeschlagen.",
+                        app_name="3D Drucker Widget",
+                        timeout=15
+                    )
+
+                elif new_state == "PAUSE":
+                    # Druck pausiert
+                    notification.notify(
+                        title="⏸️ Druck pausiert",
+                        message=f"'{filename or 'Druckauftrag'}' wurde pausiert.",
+                        app_name="3D Drucker Widget",
+                        timeout=8
+                    )
+
+            except Exception as e:
+                print(f"Benachrichtigungsfehler: {e}")
+
+    def retry_mqtt_after_power_on(self):
+        """MQTT mit Retry-Logik nach Drucker-Einschalten"""
+        # Prüfe erst ob Drucker wirklich an ist
+        state_data = self.get_state()
+        if not state_data or state_data["state"] != "on":
+            print("Drucker ist nicht an - MQTT-Verbindung übersprungen")
+            return
+
+        # Prüfe ob MQTT bereits verbunden ist
+        if self.mqtt_connected:
+            print("MQTT bereits verbunden")
+            return
+
+        # Prüfe ob MQTT-Konfiguration vorhanden ist
+        mqtt_ready = (self.bambu_ip != "DEINE_DRUCKER_IP" and
+                     self.bambu_serial != "DEINE_SERIENNUMMER" and
+                     self.bambu_access_code != "DEIN_ACCESS_CODE" and
+                     self.bambu_ip and self.bambu_serial and self.bambu_access_code)
+
+        if not mqtt_ready:
+            print("MQTT nicht konfiguriert - Verbindung übersprungen")
+            return
+
+        self.mqtt_retry_count += 1
+        print(f"🔄 MQTT-Verbindungsversuch {self.mqtt_retry_count}/5 nach Drucker-Einschalten...")
+
+        # Bestehende auto_connect_mqtt Methode verwenden
+        self.auto_connect_mqtt()
+
+        # Nach 5 Sekunden prüfen ob Verbindung erfolgreich war
+        self.root.after(5000, self.check_mqtt_retry_success)
+
+    def check_mqtt_retry_success(self):
+        """Prüfe ob MQTT-Retry erfolgreich war"""
+        if self.mqtt_connected:
+            print("✅ MQTT automatisch nach Drucker-Einschalten verbunden!")
+
+            # Optional: Benachrichtigung anzeigen
+            try:
+                from plyer import notification
+                notification.notify(
+                    title="🔗 MQTT verbunden",
+                    message="Drucker-Überwachung ist jetzt aktiv",
+                    app_name="3D Drucker Widget",
+                    timeout=5
+                )
+            except:
+                pass  # Falls plyer nicht installiert
+
+        else:
+            # Nicht verbunden - weiteren Versuch starten?
+            if self.mqtt_retry_count < 5:
+                retry_delay = self.mqtt_retry_count * 10000  # 10s, 20s, 30s, 40s
+                print(f"Versuch {self.mqtt_retry_count} fehlgeschlagen - nächster Versuch in {retry_delay//1000}s")
+                self.root.after(retry_delay, self.retry_mqtt_after_power_on)
+            else:
+                print("❌ MQTT-Verbindung nach 5 Versuchen fehlgeschlagen")
 
     def run(self):
         self.root.mainloop()
