@@ -63,7 +63,7 @@ class HomeAssistantWidget:
                     "sensor.your_printer_remaining_time",
                     "sensor.your_printer_end_time",
                     "light.your_printer_chamber_light",
-                    "image.p1s_01p09c4c1700729_titelbild"
+                    "image.your_printer_titelbild"
                 ]
             },
             "mqtt": {
@@ -286,23 +286,22 @@ class HomeAssistantWidget:
                 context.verify_mode = ssl.CERT_NONE
                 self.mqtt_client.tls_set_context(context)
 
-                # Status anzeigen
-                self.mqtt_status_label.config(text="📡 MQTT: Verbinde...", fg="#f39c12")
-
                 # Verbindung herstellen
                 self.mqtt_client.connect(self.bambu_ip, 8883, 60)
                 self.mqtt_client.loop_start()
 
             except Exception as e:
                 # Stille Fehlerbehandlung - nur Status aktualisieren
-                self.mqtt_status_label.config(text="📡 MQTT: Fehler", fg="#e74c3c")
+                if hasattr(self, 'mqtt_status_label'):
+                    self.mqtt_status_label.config(text="📡 MQTT: Verbunden", fg="#27ae60")
                 print(f"Auto-MQTT Fehler: {e}")
 
     def on_mqtt_connect_silent(self, client, userdata, flags, reason_code, properties):
         """MQTT Verbindung hergestellt - OHNE Popup"""
         if reason_code == 0:
             self.mqtt_connected = True
-            self.mqtt_status_label.config(text="📡 MQTT: Verbunden", fg="#27ae60")
+            if hasattr(self, 'mqtt_status_label'):
+                self.mqtt_status_label.config(text="📡 MQTT: Verbunden", fg="#27ae60")
             self.mqtt_connect_btn.config(text="📡 MQTT Trennen", state="normal")
 
             # Status Topic abonnieren
@@ -318,7 +317,8 @@ class HomeAssistantWidget:
             # KEIN messagebox.showinfo!
         else:
             self.mqtt_connected = False
-            self.mqtt_status_label.config(text="📡 MQTT: Fehler", fg="#e74c3c")
+            if hasattr(self, 'mqtt_status_label'):
+                self.mqtt_status_label.config(text="📡 MQTT: Verbunden", fg="#27ae60")
             self.mqtt_connect_btn.config(text="📡 MQTT Verbinden", state="normal")
 
     def get_ustreamer_image(self):
@@ -354,7 +354,8 @@ class HomeAssistantWidget:
     def on_mqtt_disconnect_silent(self, client, userdata, disconnect_flags, reason_code, properties):
         """MQTT Verbindung getrennt - OHNE Popup"""
         self.mqtt_connected = False
-        self.mqtt_status_label.config(text="📡 MQTT: Getrennt", fg="#e74c3c")
+        if hasattr(self, 'mqtt_status_label'):
+            self.mqtt_status_label.config(text="📡 MQTT: Verbunden", fg="#27ae60")
         self.mqtt_connect_btn.config(text="📡 MQTT Verbinden", state="normal")
 
         # KEIN messagebox bei unerwarteter Trennung
@@ -659,39 +660,103 @@ class HomeAssistantWidget:
         mqtt_titelbild_container = tk.Frame(progress_inner, bg='#2c3e50')
         mqtt_titelbild_container.pack(fill='x', pady=(0, 10))
 
-        # === LINKE SEITE: MQTT DATEN ===
+        # === LINKE SEITE: GROßES TITELBILD ===
+        titelbild_frame = tk.Frame(mqtt_titelbild_container, bg='#2c3e50')
+        titelbild_frame.pack(side='left', padx=(0, 15))
+
+        self.titelbild_label = tk.Label(
+            titelbild_frame,
+            text="Lade Titelbild...",
+            bg='#2c3e50',
+            fg='#95a5a6',
+            font=self.font_normal
+        )
+        self.titelbild_label.pack()
+
+        # === RECHTE SEITE: MQTT DATEN (Neues Layout) ===
         mqtt_info_frame = tk.Frame(mqtt_titelbild_container, bg='#2c3e50')
-        mqtt_info_frame.pack(side='left', fill='both', expand=True, padx=(0, 10))
+        mqtt_info_frame.pack(side='right', fill='both', expand=True)
 
         # MQTT Status
-        self.mqtt_status_label = tk.Label(
-            mqtt_info_frame,
-            text="📡 MQTT: Nicht verbunden",
+        #self.mqtt_status_label = tk.Label(
+        #    mqtt_info_frame,
+        #    text="📡 MQTT: Nicht verbunden",
+        #    font=self.font_normal,
+        #    bg='#2c3e50',
+        #    fg='#e74c3c'
+        #)
+        #self.mqtt_status_label.pack(pady=(0, 5))
+
+        # Datei-Info Header (OHNE kleines Icon)
+        file_header_frame = tk.Frame(mqtt_info_frame, bg='#2c3e50')
+        file_header_frame.pack(fill='x', pady=(0, 5))
+
+        # Dateiname und Details
+        self.file_info = tk.Label(
+            file_header_frame,
+            text="Kein Druck aktiv",
             font=self.font_normal,
             bg='#2c3e50',
-            fg='#e74c3c'
+            fg='#ecf0f1',
+            anchor='w'
         )
-        self.mqtt_status_label.pack(pady=(0, 10))
+        self.file_info.pack(fill='x')
 
-        # Druckfortschritt Titel
-        progress_title = tk.Label(
+        # Status-Zeile
+        self.print_status_label = tk.Label(
             mqtt_info_frame,
-            text="🖨️ Live Druckfortschritt",
-            font=self.font_title,
+            text="Bereit",
+            font=self.font_normal,
             bg='#2c3e50',
-            fg='#ecf0f1'
+            fg='#27ae60'
         )
-        progress_title.pack(pady=(0, 10))
+        self.print_status_label.pack(anchor='w', pady=(5, 10))
 
-        # Progress Bar (nur über MQTT-Bereich)
+        # Großer Fortschritt und Schicht-Info
+        progress_main_frame = tk.Frame(mqtt_info_frame, bg='#2c3e50')
+        progress_main_frame.pack(fill='x', pady=(0, 5))
+
+        # Großer Prozentsatz (links)
+        self.big_progress_label = tk.Label(
+            progress_main_frame,
+            text="0%",
+            font=("Segoe UI", 24, "bold"),
+            bg='#2c3e50',
+            fg='#27ae60'
+        )
+        self.big_progress_label.pack(side='left')
+
+        # Schicht-Info (rechts)
+        layer_frame = tk.Frame(progress_main_frame, bg='#2c3e50')
+        layer_frame.pack(side='right')
+
+        self.layer_info_label = tk.Label(
+            layer_frame,
+            text="Schicht: 0/0",
+            font=self.font_normal,
+            bg='#2c3e50',
+            fg='#bdc3c7'
+        )
+        self.layer_info_label.pack()
+
+        self.remaining_time_label = tk.Label(
+            layer_frame,
+            text="",
+            font=self.font_normal,
+            bg='#2c3e50',
+            fg='#bdc3c7'
+        )
+        self.remaining_time_label.pack()
+
+        # Progress Bar
         self.progress_var = tk.DoubleVar()
         progress_style = ttk.Style()
         progress_style.configure("Custom.Horizontal.TProgressbar",
-                                 background='#3498db',
+                                 background='#27ae60',
                                  troughcolor='#34495e',
                                  borderwidth=0,
-                                 lightcolor='#3498db',
-                                 darkcolor='#3498db')
+                                 lightcolor='#27ae60',
+                                 darkcolor='#27ae60')
 
         self.progress_bar = ttk.Progressbar(
             mqtt_info_frame,
@@ -699,37 +764,7 @@ class HomeAssistantWidget:
             maximum=100,
             style="Custom.Horizontal.TProgressbar"
         )
-        self.progress_bar.pack(fill='x', pady=(0, 5))
-
-        # Progress Info
-        self.progress_info = tk.Label(
-            mqtt_info_frame,
-            text="Fortschritt: 0% | Schicht: 0/0",
-            font=self.font_normal,
-            bg='#2c3e50',
-            fg='#bdc3c7'
-        )
-        self.progress_info.pack(pady=(0, 5))
-
-        # Zeit Info
-        self.time_info = tk.Label(
-            mqtt_info_frame,
-            text="Zeit: --:-- / Verbleibend: --:--",
-            font=self.font_normal,
-            bg='#2c3e50',
-            fg='#bdc3c7'
-        )
-        self.time_info.pack(pady=(0, 5))
-
-        # Datei Info
-        self.file_info = tk.Label(
-            mqtt_info_frame,
-            text="Datei: Kein Druck aktiv",
-            font=self.font_normal,
-            bg='#2c3e50',
-            fg='#bdc3c7'
-        )
-        self.file_info.pack(pady=(0, 5))
+        self.progress_bar.pack(fill='x', pady=(0, 10))
 
         # MQTT Connect Button
         self.mqtt_connect_btn = tk.Button(
@@ -746,17 +781,7 @@ class HomeAssistantWidget:
             activebackground='#d35400',
             activeforeground='white'
         )
-        self.mqtt_connect_btn.pack(pady=(10, 0))
-
-        # === RECHTE SEITE: NUR TITELBILD ===
-        self.titelbild_label = tk.Label(
-            mqtt_titelbild_container,
-            text="Lade Titelbild...",
-            bg='#2c3e50',
-            fg='#95a5a6',
-            font=self.font_normal
-        )
-        self.titelbild_label.pack(side='right', fill='both', padx=(10, 0))
+        self.mqtt_connect_btn.pack(pady=(5, 0))
 
         # Sensoren Bereich - Moderne Card (rechte Seite)
         sensor_card = tk.Frame(horizontal_frame, bg='#34495e', relief='solid', bd=1)
@@ -1668,7 +1693,8 @@ class HomeAssistantWidget:
             self.mqtt_client.tls_set_context(context)
 
             # Status anzeigen
-            self.mqtt_status_label.config(text="📡 MQTT: Verbinde...", fg="#f39c12")
+            if hasattr(self, 'mqtt_status_label'):
+                self.mqtt_status_label.config(text="📡 MQTT: Verbunden", fg="#27ae60")
             self.mqtt_connect_btn.config(text="🔄 Verbinde...", state="disabled")
 
             # Verbindung herstellen (mit Timeout)
@@ -1679,14 +1705,16 @@ class HomeAssistantWidget:
             self.root.after(10000, self.check_mqtt_connection)
 
         except Exception as e:
-            self.mqtt_status_label.config(text="📡 MQTT: Fehler", fg="#e74c3c")
+            if hasattr(self, 'mqtt_status_label'):
+                self.mqtt_status_label.config(text="📡 MQTT: Verbunden", fg="#27ae60")
             self.mqtt_connect_btn.config(text="📡 MQTT Verbinden", state="normal")
             messagebox.showerror("MQTT Fehler", f"Verbindung fehlgeschlagen:\n{str(e)}\n\nPrüfe IP-Adresse und Netzwerkverbindung!")
 
     def check_mqtt_connection(self):
         """Prüft ob MQTT-Verbindung erfolgreich war"""
         if not self.mqtt_connected:
-            self.mqtt_status_label.config(text="📡 MQTT: Timeout", fg="#e74c3c")
+            if hasattr(self, 'mqtt_status_label'):
+                self.mqtt_status_label.config(text="📡 MQTT: Verbunden", fg="#27ae60")
             self.mqtt_connect_btn.config(text="📡 MQTT Verbinden", state="normal")
             messagebox.showwarning("Verbindung fehlgeschlagen",
                                  "MQTT-Verbindung konnte nicht hergestellt werden.\n\n" +
@@ -1706,7 +1734,8 @@ class HomeAssistantWidget:
             print(f"MQTT Disconnect Fehler: {e}")
 
         self.mqtt_connected = False
-        self.mqtt_status_label.config(text="📡 MQTT: Nicht verbunden", fg="#e74c3c")
+        if hasattr(self, 'mqtt_status_label'):
+            self.mqtt_status_label.config(text="📡 MQTT: Verbunden", fg="#27ae60")
         self.mqtt_connect_btn.config(text="📡 MQTT Verbinden", state="normal")
 
         # Cache zurücksetzen
@@ -1727,7 +1756,8 @@ class HomeAssistantWidget:
         """MQTT Verbindung hergestellt"""
         if reason_code == 0:
             self.mqtt_connected = True
-            self.mqtt_status_label.config(text="📡 MQTT: Verbunden", fg="#27ae60")
+            if hasattr(self, 'mqtt_status_label'):
+                self.mqtt_status_label.config(text="📡 MQTT: Verbunden", fg="#27ae60")
             self.mqtt_connect_btn.config(text="📡 MQTT Trennen", state="normal")
 
             # Status Topic abonnieren
@@ -1742,14 +1772,16 @@ class HomeAssistantWidget:
 
         else:
             self.mqtt_connected = False
-            self.mqtt_status_label.config(text="📡 MQTT: Fehler", fg="#e74c3c")
+            if hasattr(self, 'mqtt_status_label'):
+                self.mqtt_status_label.config(text="📡 MQTT: Verbunden", fg="#27ae60")
             self.mqtt_connect_btn.config(text="📡 MQTT Verbinden", state="normal")
             messagebox.showerror("MQTT Fehler", f"Verbindung fehlgeschlagen: Code {reason_code}")
 
     def on_mqtt_disconnect(self, client, userdata, disconnect_flags, reason_code, properties):
         """MQTT Verbindung getrennt"""
         self.mqtt_connected = False
-        self.mqtt_status_label.config(text="📡 MQTT: Getrennt", fg="#e74c3c")
+        if hasattr(self, 'mqtt_status_label'):
+            self.mqtt_status_label.config(text="📡 MQTT: Verbunden", fg="#27ae60")
         self.mqtt_connect_btn.config(text="📡 MQTT Verbinden", state="normal")
 
         if reason_code != 0:
@@ -1824,62 +1856,57 @@ class HomeAssistantWidget:
         # Fortschritt
         progress = self.last_print_data['progress']
         self.progress_var.set(progress)
+        self.big_progress_label.config(text=f"{progress:.0f}%")
 
         # Schichten
         layer_num = self.last_print_data['layer_num']
         total_layers = self.last_print_data['total_layers']
+        self.layer_info_label.config(text=f"Schicht: {layer_num}/{total_layers}")
 
-        self.progress_info.config(text=f"Fortschritt: {progress}% | Schicht: {layer_num}/{total_layers}")
-
-        # Zeit - Nur verbleibende Zeit anzeigen, da verstrichene Zeit nicht verfügbar
-        remaining_time = self.last_print_data['remaining_time']
-
-        if remaining_time > 0:
-            remaining_hours = remaining_time // 60
-            remaining_minutes = remaining_time % 60
-            remaining_str = f"{remaining_hours:02d}:{remaining_minutes:02d}"
-
-            # Geschätzte Gesamtzeit berechnen wenn Fortschritt > 0
-            if progress > 0:
-                estimated_total = remaining_time / (1 - progress/100)
-                elapsed_time = estimated_total - remaining_time
-                elapsed_hours = int(elapsed_time // 60)
-                elapsed_mins = int(elapsed_time % 60)
-                elapsed_str = f"{elapsed_hours:02d}:{elapsed_mins:02d}"
-
-                total_hours = int(estimated_total // 60)
-                total_mins = int(estimated_total % 60)
-                total_str = f"{total_hours:02d}:{total_mins:02d}"
-
-                time_text = f"Verstichen: {elapsed_str} | Verbleibend: {remaining_str} | Gesamt: {total_str}"
-            else:
-                time_text = f"Verbleibende Zeit: {remaining_str}"
-        else:
-            time_text = "Zeit: Keine Daten verfügbar"
-
-        self.time_info.config(text=time_text)
-
-        # Dateiname und Status
-        filename = self.last_print_data['filename']
+        # Status
         gcode_state = self.last_print_data['gcode_state']
-
         if gcode_state == "RUNNING":
-            self.file_info.config(text=f"Datei: {filename} (Druckt)", fg="#27ae60")
+            self.print_status_label.config(text="Drucken", fg="#27ae60")
         elif gcode_state == "PAUSE":
-            self.file_info.config(text=f"Datei: {filename} (Pausiert)", fg="#f39c12")
+            self.print_status_label.config(text="Pausiert", fg="#f39c12")
         elif gcode_state == "FINISH":
-            self.file_info.config(text=f"Datei: {filename} (Fertig)", fg="#3498db")
+            self.print_status_label.config(text="Fertig", fg="#3498db")
         elif gcode_state == "FAILED":
-            self.file_info.config(text=f"Datei: {filename} (Fehler)", fg="#e74c3c")
+            self.print_status_label.config(text="Fehler", fg="#e74c3c")
         else:
-            self.file_info.config(text="Datei: Kein Druck aktiv", fg="#bdc3c7")
+            self.print_status_label.config(text="Bereit", fg="#95a5a6")
+
+        # Verbleibende Zeit
+        remaining_time = self.last_print_data['remaining_time']
+        if remaining_time > 0:
+            hours = remaining_time // 60
+            minutes = remaining_time % 60
+            self.remaining_time_label.config(text=f"-{hours}h{minutes}m")
+        else:
+            self.remaining_time_label.config(text="")
+
+        # Dateiname
+        filename = self.last_print_data['filename']
+        if filename and filename != 'Kein Druck aktiv':
+            self.file_info.config(text=filename)
+        else:
+            self.file_info.config(text="Kein Druck aktiv")
 
     def update_titelbild(self):
-        """Drucker Titelbild von HA laden"""
+        """Drucker Titelbild von HA laden - großes Bild links"""
         def load_image():
             try:
-                # Direkte Entity verwenden
-                titelbild_entity = "image.p1s_01p09c4c1700729_titelbild"
+                # Dynamische Entity basierend auf Seriennummer
+                if self.bambu_serial and self.bambu_serial != "DEINE_SERIENNUMMER":
+                    serial_lower = self.bambu_serial.lower()
+                    titelbild_entity = f"image.p1s_{serial_lower}_titelbild"
+                else:
+                    # Fallback wenn keine Seriennummer konfiguriert
+                    print("Keine Seriennummer konfiguriert - kann Titelbild nicht laden")
+                    if hasattr(self, 'titelbild_label'):
+                        self.titelbild_label.config(text="Seriennummer nicht konfiguriert")
+                    return
+
 
                 # Bild von HA API laden
                 response = requests.get(
@@ -1888,12 +1915,14 @@ class HomeAssistantWidget:
                     timeout=5
                 )
 
+
                 if response.status_code == 200:
                     entity_data = response.json()
 
                     # Prüfe ob Entity verfügbar ist
                     if entity_data['state'] == 'unavailable':
-                        self.titelbild_label.config(text="Titelbild nicht verfügbar")
+                        if hasattr(self, 'titelbild_label'):
+                            self.titelbild_label.config(text="Titelbild nicht verfügbar")
                         return
 
                     # Bild-URL aus Attributen holen
@@ -1914,8 +1943,8 @@ class HomeAssistantWidget:
                             image_data = img_response.content
                             image = Image.open(io.BytesIO(image_data))
 
-                            # Bild auf passende Größe skalieren
-                            max_width, max_height = 300, 200
+                            # Großes Bild für linke Seite
+                            max_width, max_height = 300, 250
 
                             # Seitenverhältnis beibehalten
                             img_ratio = image.width / image.height
@@ -1931,28 +1960,33 @@ class HomeAssistantWidget:
                             image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
                             photo = ImageTk.PhotoImage(image)
 
-                            # Label aktualisieren
-                            self.titelbild_label.config(image=photo, text="")
-                            self.titelbild_label.image = photo
+                            # Großes Titelbild aktualisieren
+                            if hasattr(self, 'titelbild_label'):
+                                self.titelbild_label.config(image=photo, text="")
+                                self.titelbild_label.image = photo
 
 
                         else:
                             error_msg = f"Bild laden fehlgeschlagen: {img_response.status_code}"
                             print(error_msg)
-                            self.titelbild_label.config(text=error_msg)
+                            if hasattr(self, 'titelbild_label'):
+                                self.titelbild_label.config(text=error_msg)
                     else:
                         error_msg = "Keine Bild-URL gefunden"
                         print(error_msg)
-                        self.titelbild_label.config(text=error_msg)
+                        if hasattr(self, 'titelbild_label'):
+                            self.titelbild_label.config(text=error_msg)
                 else:
                     error_msg = f"Entity nicht gefunden: {response.status_code}"
                     print(error_msg)
-                    self.titelbild_label.config(text=error_msg)
+                    if hasattr(self, 'titelbild_label'):
+                        self.titelbild_label.config(text=error_msg)
 
             except Exception as e:
                 error_msg = f"Titelbild Fehler: {e}"
                 print(error_msg)
-                self.titelbild_label.config(text="Fehler beim Laden")
+                if hasattr(self, 'titelbild_label'):
+                    self.titelbild_label.config(text="Fehler beim Laden")
 
         threading.Thread(target=load_image, daemon=True).start()
 
@@ -2363,57 +2397,61 @@ class SimpleStreamReader:
             return False
 
     def get_latest_frame(self):
-            """Frame mit OpenCV lesen und Timeout-Erkennung"""
-            if not self.running or not self.cap:
-                return None
-
-            try:
-                ret, frame = self.cap.read()
-            except cv2.error:
-                # OpenCV Fehler - VideoCapture ist korrupt, komplett neu erstellen
-                print("OpenCV Fehler - erstelle VideoCapture neu")
-                self.cap.release()
-                self.cap = None
-                self.running = False
-                return None
-            except Exception:
-                # Andere Fehler auch abfangen
-                self.cap.release()
-                self.cap = None
-                self.running = False
-                return None
-            if ret:
-                # Erfolgreicher Frame - Timestamp aktualisieren
-                import time
-                self.last_frame_time = time.time()
-                self.retry_count = 0  # Reset bei erfolgreichem Frame
-
-                # OpenCV BGR zu RGB konvertieren
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                # Zu JPEG encodieren
-                _, buffer = cv2.imencode('.jpg', frame_rgb)
-                return buffer.tobytes()
-            else:
-                # Kein Frame erhalten - prüfe Timeout
-                import time
-                current_time = time.time()
-
-                if self.last_frame_time and (current_time - self.last_frame_time) > self.frame_timeout:
-                    print(f"µStreamer Timeout erkannt - versuche Neustart (Versuch {self.retry_count + 1})")
-                    if self.retry_count < self.max_retries:
-                        self.retry_count += 1
-                        self.restart_stream()
-                    else:
-                        print("µStreamer: Max. Versuche erreicht - Stream deaktiviert")
-                        self.running = False
-
+        """Frame mit OpenCV lesen und Timeout-Erkennung"""
+        if not self.running or not self.cap:
             return None
+
+        try:
+            ret, frame = self.cap.read()
+        except cv2.error:
+            # OpenCV Fehler - VideoCapture ist korrupt, komplett neu erstellen
+            print("OpenCV Fehler - erstelle VideoCapture neu")
+            if self.cap:  # Prüfe ob cap existiert
+                self.cap.release()
+            self.cap = None
+            self.running = False
+            return None
+        except Exception:
+            # Andere Fehler auch abfangen
+            if self.cap:  # Prüfe ob cap existiert
+                self.cap.release()
+            self.cap = None
+            self.running = False
+            return None
+
+        if ret:
+            # Erfolgreicher Frame - Timestamp aktualisieren
+            import time
+            self.last_frame_time = time.time()
+            self.retry_count = 0  # Reset bei erfolgreichem Frame
+
+            # OpenCV BGR zu RGB konvertieren
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            # Zu JPEG encodieren
+            _, buffer = cv2.imencode('.jpg', frame_rgb)
+            return buffer.tobytes()
+        else:
+            # Kein Frame erhalten - prüfe Timeout
+            import time
+            current_time = time.time()
+
+            if self.last_frame_time and (current_time - self.last_frame_time) > self.frame_timeout:
+                print(f"µStreamer Timeout erkannt - versuche Neustart (Versuch {self.retry_count + 1})")
+                if self.retry_count < self.max_retries:
+                    self.retry_count += 1
+                    self.restart_stream()
+                else:
+                    print("µStreamer: Max. Versuche erreicht - Stream deaktiviert")
+                    self.running = False
+
+        return None
 
     def stop_stream(self):
         """Stream stoppen"""
         self.running = False
-        if self.cap:
+        if self.cap:  # Prüfe ob cap existiert bevor release()
             self.cap.release()
+            self.cap = None
 
     def restart_stream(self):
         """Stream neu starten"""
