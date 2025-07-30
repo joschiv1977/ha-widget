@@ -76,6 +76,12 @@ class HomeAssistantWidget:
             "ui": {
                 "default_camera_size": 2  # 0=S, 1=M, 2=L, 3=XL
             },
+            "automation": {
+                "auto_light_on_mqtt": True,        # Licht bei MQTT-Verbindung einschalten
+                "auto_light_only_dark": True,      # Nur bei Dunkelheit
+                "dark_start_hour": 18,             # Ab wann dunkel (18:00)
+                "dark_end_hour": 8                 # Bis wann dunkel (8:00)
+            },
             "ustreamer": {
                 "enabled": False,
                 "pi5_ip": "192.168.178.2",
@@ -287,7 +293,7 @@ class HomeAssistantWidget:
 
 
     def auto_connect_mqtt(self):
-        """MQTT automatisch und still verbinden"""
+        """MQTT automatisch und still verbinden - NICHT-BLOCKIEREND"""
         # Nur MQTT-Daten prüfen, KEINE Home Assistant Abhängigkeit
         mqtt_ready = (self.bambu_ip != "DEINE_DRUCKER_IP" and
                      self.bambu_serial != "DEINE_SERIENNUMMER" and
@@ -295,29 +301,39 @@ class HomeAssistantWidget:
                      self.bambu_ip and self.bambu_serial and self.bambu_access_code)
 
         if not self.mqtt_connected and mqtt_ready:
-            try:
-                # MQTT Client erstellen
-                self.mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-                self.mqtt_client.username_pw_set("bblp", self.bambu_access_code)
-                self.mqtt_client.on_connect = self.on_mqtt_connect_silent
-                self.mqtt_client.on_message = self.on_mqtt_message
-                self.mqtt_client.on_disconnect = self.on_mqtt_disconnect_silent
+            # MQTT-Verbindung in separatem Thread starten
+            def connect_in_thread():
+                try:
+                    # MQTT Client erstellen
+                    self.mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+                    self.mqtt_client.username_pw_set("bblp", self.bambu_access_code)
+                    self.mqtt_client.on_connect = self.on_mqtt_connect_silent
+                    self.mqtt_client.on_message = self.on_mqtt_message
+                    self.mqtt_client.on_disconnect = self.on_mqtt_disconnect_silent
 
-                # SSL Context
-                context = ssl.create_default_context()
-                context.check_hostname = False
-                context.verify_mode = ssl.CERT_NONE
-                self.mqtt_client.tls_set_context(context)
+                    # SSL Context
+                    context = ssl.create_default_context()
+                    context.check_hostname = False
+                    context.verify_mode = ssl.CERT_NONE
+                    self.mqtt_client.tls_set_context(context)
 
-                # Verbindung herstellen
-                self.mqtt_client.connect(self.bambu_ip, 8883, 60)
-                self.mqtt_client.loop_start()
+                    # Verbindung herstellen (NICHT-BLOCKIEREND im Thread)
+                    self.mqtt_client.connect(self.bambu_ip, 8883, 60)
+                    self.mqtt_client.loop_start()
 
-            except Exception as e:
-                # Stille Fehlerbehandlung - nur Status aktualisieren
-                if hasattr(self, 'mqtt_status_label'):
-                    self.mqtt_status_label.config(text="📡 MQTT: Verbunden", fg="#27ae60")
-                print(f"Auto-MQTT Fehler: {e}")
+                except Exception as e:
+                    # Stille Fehlerbehandlung - nur Status aktualisieren
+                    print(f"Auto-MQTT Thread Fehler: {e}")
+                    # GUI-Update im Hauptthread
+                    self.root.after(0, lambda: self.update_mqtt_status_after_error())
+
+            # Thread starten
+            threading.Thread(target=connect_in_thread, daemon=True).start()
+
+    def update_mqtt_status_after_error(self):
+        """GUI-Update nach MQTT-Fehler im Hauptthread"""
+        if hasattr(self, 'mqtt_status_label'):
+            self.mqtt_status_label.config(text="📡 MQTT: Verbunden", fg="#27ae60")
 
     def on_mqtt_connect_silent(self, client, userdata, flags, reason_code, properties):
         """MQTT Verbindung hergestellt - OHNE Popup"""
@@ -337,7 +353,9 @@ class HomeAssistantWidget:
             # Periodisches Pushall alle 10 Sekunden
             self.schedule_periodic_pushall()
 
-            # KEIN messagebox.showinfo!
+            # Licht in 2 Sekunden automatisch einschalten
+            print("⏰ MQTT verbunden - Licht wird in 2 Sekunden eingeschaltet...")
+            self.root.after(2000, self.simple_auto_light_with_time)
         else:
             self.mqtt_connected = False
             if hasattr(self, 'mqtt_status_label'):
@@ -907,6 +925,7 @@ class HomeAssistantWidget:
         settings_menu.add_command(label="MQTT Drucker", command=self.open_mqtt_settings)
         settings_menu.add_command(label="µStreamer Kamera", command=self.open_ustreamer_settings)
         settings_menu.add_command(label="Anzeige", command=self.open_display_settings)
+        settings_menu.add_command(label="Lichtsteuerung", command=self.open_automation_settings)
 
         # Verbindung-Menü
         connection_menu = tk.Menu(menubar, tearoff=0)
@@ -927,6 +946,8 @@ class HomeAssistantWidget:
                     loaded_config = json.load(f)
                     # Merge mit Default-Konfiguration
                     self.merge_config(loaded_config)
+                    # Fehlende Sektionen aus Default-Config hinzufügen
+                    self.ensure_default_sections()
             else:
                 # Erste Ausführung - Konfigurationsdatei erstellen
                 self.save_config()
@@ -970,10 +991,48 @@ class HomeAssistantWidget:
     def save_config(self):
         """Konfiguration in Datei speichern"""
         try:
-            with open(self.config_file, 'w', encoding='utf-8') as f:
+            import os
+            import tempfile
+
+            # Backup der alten Datei falls vorhanden
+            if os.path.exists(self.config_file):
+                try:
+                    os.chmod(self.config_file, 0o777)  # Schreibrechte setzen
+                except:
+                    pass
+
+            # In temporäre Datei schreiben und dann umbenennen
+            temp_file = self.config_file + '.tmp'
+            with open(temp_file, 'w', encoding='utf-8') as f:
                 json.dump(self.config, f, indent=2, ensure_ascii=False)
+
+            # Alte Datei löschen und neue umbenennen
+            if os.path.exists(self.config_file):
+                os.remove(self.config_file)
+            os.rename(temp_file, self.config_file)
+
         except Exception as e:
-            messagebox.showerror("Konfigurationsfehler", f"Fehler beim Speichern: {str(e)}")
+            messagebox.showerror("Konfigurationsfehler", f"Fehler beim Speichern: {str(e)}\n\nVersuche die App als Administrator zu starten.")
+
+    def ensure_default_sections(self):
+        """Stellt sicher, dass alle Default-Sektionen in der Konfiguration vorhanden sind"""
+        # Automation Sektion hinzufügen falls nicht vorhanden
+        if "automation" not in self.config:
+            self.config["automation"] = {
+                "auto_light_on_mqtt": True,
+                "auto_light_only_dark": True,
+                "dark_start_hour": 18,
+                "dark_end_hour": 8
+            }
+            print("✅ Automation-Sektion zur Konfiguration hinzugefügt")
+            self.save_config()  # Sofort speichern
+
+        # Weitere Default-Sektionen können hier hinzugefügt werden
+        if "ui" not in self.config:
+            self.config["ui"] = {
+                "default_camera_size": 2
+            }
+            self.save_config()
 
     def generate_printer_entities(self, serial, model="p1s"):
         """Automatische Entity-Generierung basierend auf Drucker-Seriennummer"""
@@ -1697,41 +1756,51 @@ class HomeAssistantWidget:
             self.sensor_labels[entity] = value_label
 
     def connect_mqtt(self):
-        """MQTT Verbindung zum Bambu Drucker herstellen - MIT Popups"""
+        """MQTT Verbindung zum Bambu Drucker herstellen - MIT Popups - NICHT-BLOCKIEREND"""
         if self.mqtt_connected:
             self.disconnect_mqtt()
             return
 
-        try:
-            # MQTT Client erstellen
-            self.mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-            self.mqtt_client.username_pw_set("bblp", self.bambu_access_code)
-            self.mqtt_client.on_connect = self.on_mqtt_connect  # MIT Popup
-            self.mqtt_client.on_message = self.on_mqtt_message
-            self.mqtt_client.on_disconnect = self.on_mqtt_disconnect  # MIT Popup
-            # SSL Context
-            context = ssl.create_default_context()
-            context.check_hostname = False
-            context.verify_mode = ssl.CERT_NONE
-            self.mqtt_client.tls_set_context(context)
+        # Status anzeigen
+        if hasattr(self, 'mqtt_status_label'):
+            self.mqtt_status_label.config(text="📡 MQTT: Verbunden", fg="#27ae60")
+        self.mqtt_connect_btn.config(text="🔄 Verbinde...", state="disabled")
 
-            # Status anzeigen
-            if hasattr(self, 'mqtt_status_label'):
-                self.mqtt_status_label.config(text="📡 MQTT: Verbunden", fg="#27ae60")
-            self.mqtt_connect_btn.config(text="🔄 Verbinde...", state="disabled")
+        def connect_in_thread():
+            try:
+                # MQTT Client erstellen
+                self.mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+                self.mqtt_client.username_pw_set("bblp", self.bambu_access_code)
+                self.mqtt_client.on_connect = self.on_mqtt_connect  # MIT Popup
+                self.mqtt_client.on_message = self.on_mqtt_message
+                self.mqtt_client.on_disconnect = self.on_mqtt_disconnect  # MIT Popup
 
-            # Verbindung herstellen (mit Timeout)
-            self.mqtt_client.connect(self.bambu_ip, 8883, 60)
-            self.mqtt_client.loop_start()
+                # SSL Context
+                context = ssl.create_default_context()
+                context.check_hostname = False
+                context.verify_mode = ssl.CERT_NONE
+                self.mqtt_client.tls_set_context(context)
 
-            # Nach 15 Sekunden prüfen ob Verbindung erfolgreich
-            self.root.after(15000, self.check_mqtt_connection)
+                # Verbindung herstellen (mit Timeout)
+                self.mqtt_client.connect(self.bambu_ip, 8883, 60)
+                self.mqtt_client.loop_start()
 
-        except Exception as e:
-            if hasattr(self, 'mqtt_status_label'):
-                self.mqtt_status_label.config(text="📡 MQTT: Verbunden", fg="#27ae60")
-            self.mqtt_connect_btn.config(text="📡 MQTT Verbinden", state="normal")
-            messagebox.showerror("MQTT Fehler", f"Verbindung fehlgeschlagen:\n{str(e)}\n\nPrüfe IP-Adresse und Netzwerkverbindung!")
+                # Nach 15 Sekunden prüfen ob Verbindung erfolgreich
+                self.root.after(15000, self.check_mqtt_connection)
+
+            except Exception as e:
+                # GUI-Update im Hauptthread
+                self.root.after(0, lambda: self.handle_mqtt_connect_error(str(e)))
+
+        # Thread starten
+        threading.Thread(target=connect_in_thread, daemon=True).start()
+
+    def handle_mqtt_connect_error(self, error_msg):
+        """MQTT-Verbindungsfehler im Hauptthread behandeln"""
+        if hasattr(self, 'mqtt_status_label'):
+            self.mqtt_status_label.config(text="📡 MQTT: Verbunden", fg="#27ae60")
+        self.mqtt_connect_btn.config(text="📡 MQTT Verbinden", state="normal")
+        messagebox.showerror("MQTT Fehler", f"Verbindung fehlgeschlagen:\n{error_msg}\n\nPrüfe IP-Adresse und Netzwerkverbindung!")
 
     def check_mqtt_connection(self):
         """Prüft ob MQTT-Verbindung erfolgreich war"""
@@ -2496,6 +2565,184 @@ class HomeAssistantWidget:
                 self.root.after(retry_delay, self.retry_mqtt_after_power_on)
             else:
                 print("❌ MQTT-Verbindung nach 5 Versuchen fehlgeschlagen")
+
+
+    def simple_auto_light_with_time(self):
+        """Licht einschalten wenn es in der konfigurierten Zeitspanne ist"""
+        try:
+            from datetime import datetime
+            current_hour = datetime.now().hour
+
+            dark_start = self.config["automation"]["dark_start_hour"]
+            dark_end = self.config["automation"]["dark_end_hour"]
+
+            # Dunkelheit-Check (berücksichtigt Mitternacht)
+            if dark_start > dark_end:  # z.B. 18-8 (über Mitternacht)
+                is_dark = current_hour >= dark_start or current_hour < dark_end
+            else:  # z.B. 22-6 (normale Spanne)
+                is_dark = dark_start <= current_hour < dark_end
+
+            if is_dark:
+                print(f"🌙 Dunkelzeit - verwende Button-Logik für Licht...")
+
+                # Verwende die GLEICHE Logik wie der funktionierende Button!
+                self.auto_toggle_light_on()
+            else:
+                print(f"☀️ Hellzeit - Licht bleibt aus")
+
+        except Exception as e:
+            print(f"Auto-Licht Fehler: {e}")
+
+    def auto_toggle_light_on(self):
+        """Licht automatisch einschalten mit Button-Logik"""
+        try:
+            # EXAKT die gleiche Logik wie toggle_light() aber nur für "an"
+            response = requests.post(
+                f"{self.ha_url}/api/services/light/turn_on",
+                json={"entity_id": self.light_entity},
+                headers=self.headers,
+                timeout=5
+            )
+
+            if response.status_code == 200:
+                print("✅ Licht automatisch eingeschaltet")
+                # Button sofort aktualisieren für besseres UX
+                self.update_light_button_state("on")
+                # Nach kurzer Verzögerung echten Status abrufen
+                self.root.after(1000, self.update_light_from_server)
+            else:
+                print(f"❌ Licht-Befehl fehlgeschlagen: {response.status_code}")
+
+        except Exception as e:
+            print(f"Verbindungsfehler beim automatischen Lichtschalten: {str(e)}")
+
+    def open_automation_settings(self):
+        """Automatisierungs-Einstellungen öffnen"""
+        settings_window = tk.Toplevel(self.root)
+        settings_window.title("Automatisierungs-Einstellungen")
+        # Icon setzen
+        try:
+            settings_window.iconbitmap('icon.ico')
+        except:
+            pass
+        self.center_window(settings_window, 530, 430)
+        settings_window.configure(bg='#2c3e50')
+        settings_window.resizable(False, False)
+
+        main_frame = tk.Frame(settings_window, bg='#2c3e50')
+        main_frame.pack(fill='both', expand=True, padx=20, pady=20)
+
+        # === LICHT-AUTOMATIK SEKTION ===
+        light_frame = tk.Frame(main_frame, bg='#34495e', relief='solid', bd=1)
+        light_frame.pack(fill='x', pady=(0, 15))
+
+        light_header = tk.Frame(light_frame, bg='#f39c12')
+        light_header.pack(fill='x')
+
+        tk.Label(light_header, text="💡 Druckraumlicht Automatik",
+                font=("Segoe UI", 11, "bold"), bg='#f39c12', fg='white').pack(pady=8)
+
+        light_body = tk.Frame(light_frame, bg='#34495e')
+        light_body.pack(fill='x', padx=15, pady=15)
+
+        # Automatik aktivieren
+        auto_light_var = tk.BooleanVar(value=self.config["automation"]["auto_light_on_mqtt"])
+        auto_light_check = tk.Checkbutton(
+            light_body,
+            text="Licht automatisch bei MQTT-Verbindung einschalten",
+            variable=auto_light_var,
+            font=self.font_normal,
+            bg='#34495e',
+            fg='#bdc3c7',
+            selectcolor='#2c3e50'
+        )
+        auto_light_check.pack(anchor='w', pady=(0, 10))
+
+        # Nur bei Dunkelheit
+        only_dark_var = tk.BooleanVar(value=self.config["automation"]["auto_light_only_dark"])
+        only_dark_check = tk.Checkbutton(
+            light_body,
+            text="Nur bei Dunkelheit (zwischen den unten eingestellten Zeiten)",
+            variable=only_dark_var,
+            font=self.font_normal,
+            bg='#34495e',
+            fg='#bdc3c7',
+            selectcolor='#2c3e50'
+        )
+        only_dark_check.pack(anchor='w', pady=(0, 15))
+
+        # Zeiten
+        time_frame = tk.Frame(light_body, bg='#34495e')
+        time_frame.pack(fill='x')
+
+        # Dunkelheit Start
+        start_frame = tk.Frame(time_frame, bg='#34495e')
+        start_frame.pack(side='left', fill='x', expand=True, padx=(0, 10))
+
+        tk.Label(start_frame, text="Dunkel ab:",
+                 font=self.font_normal, bg='#34495e', fg='#bdc3c7').pack(anchor='w')
+
+        start_hour_var = tk.StringVar(value=str(self.config["automation"]["dark_start_hour"]))
+        start_spinbox = tk.Spinbox(start_frame, from_=0, to=23, width=5,
+                                  textvariable=start_hour_var, font=self.font_normal)
+        start_spinbox.pack(anchor='w', pady=(2, 0))
+
+        tk.Label(start_frame, text="Uhr", font=self.font_small,
+                 bg='#34495e', fg='#95a5a6').pack(anchor='w')
+
+        # Dunkelheit Ende
+        end_frame = tk.Frame(time_frame, bg='#34495e')
+        end_frame.pack(side='right', fill='x', expand=True, padx=(10, 0))
+
+        tk.Label(end_frame, text="Hell ab:",
+                 font=self.font_normal, bg='#34495e', fg='#bdc3c7').pack(anchor='w')
+
+        end_hour_var = tk.StringVar(value=str(self.config["automation"]["dark_end_hour"]))
+        end_spinbox = tk.Spinbox(end_frame, from_=0, to=23, width=5,
+                                textvariable=end_hour_var, font=self.font_normal)
+        end_spinbox.pack(anchor='w', pady=(2, 0))
+
+        tk.Label(end_frame, text="Uhr", font=self.font_small,
+                 bg='#34495e', fg='#95a5a6').pack(anchor='w')
+
+        # Info Box
+        info_frame = tk.Frame(main_frame, bg='#2c3e50', relief='solid', bd=1)
+        info_frame.pack(fill='x', pady=(10, 0))
+
+        info_text = tk.Label(info_frame,
+                           text="💡 Beispiel: Dunkel ab 18 Uhr bis 8 Uhr = Licht wird zwischen 18:00-8:00 automatisch eingeschaltet",
+                           font=("Segoe UI", 9), bg='#2c3e50', fg='#95a5a6', justify='center', wraplength=400)
+        info_text.pack(padx=10, pady=8)
+
+        # Buttons
+        button_frame = tk.Frame(main_frame, bg='#2c3e50')
+        button_frame.pack(fill='x', pady=(20, 0))
+
+        def save_automation_settings():
+            # Validierung
+            try:
+                start_hour = int(start_hour_var.get())
+                end_hour = int(end_hour_var.get())
+                if not (0 <= start_hour <= 23) or not (0 <= end_hour <= 23):
+                    raise ValueError("Stunden müssen zwischen 0 und 23 liegen")
+            except ValueError as e:
+                messagebox.showerror("Eingabefehler", f"Ungültige Zeitangabe: {e}")
+                return
+
+            # Konfiguration speichern
+            self.config["automation"]["auto_light_on_mqtt"] = auto_light_var.get()
+            self.config["automation"]["auto_light_only_dark"] = only_dark_var.get()
+            self.config["automation"]["dark_start_hour"] = start_hour
+            self.config["automation"]["dark_end_hour"] = end_hour
+
+            self.save_config()
+            messagebox.showinfo("Gespeichert", "Automatisierungs-Einstellungen gespeichert!")
+            settings_window.destroy()
+
+        tk.Button(button_frame, text="Speichern", command=save_automation_settings,
+                  bg='#27ae60', fg='white', font=self.font_normal, width=15).pack(side='right', padx=5)
+        tk.Button(button_frame, text="Abbrechen", command=settings_window.destroy,
+                  bg='#e74c3c', fg='white', font=self.font_normal, width=15).pack(side='right')
 
     def run(self):
         self.root.mainloop()
